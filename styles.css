@@ -23,10 +23,18 @@ body {
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
+body.output-mode {
+  background: #000;
+}
+
 .app {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 360px 1fr;
+}
+
+body.output-mode .app {
+  grid-template-columns: 1fr;
 }
 
 .controls {
@@ -34,6 +42,10 @@ body {
   background: linear-gradient(180deg, #20242f 0%, #171a21 100%);
   padding: 1rem;
   overflow-y: auto;
+}
+
+body.output-mode .controls {
+  display: none;
 }
 
 .controls h1 {
@@ -145,6 +157,17 @@ button:hover {
   width: 100%;
 }
 
+#video-opacity {
+  flex: 1;
+}
+
+#video-opacity-value {
+  flex: 0 0 52px;
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
 .multi-preset-list {
   margin-top: 0.5rem;
   max-height: 140px;
@@ -181,11 +204,20 @@ button:hover {
   padding: 1.25rem;
 }
 
+body.output-mode .workspace {
+  padding: 0;
+}
+
 .stage-wrap {
   width: min(92vw, calc(100vw - 420px));
   height: min(92vh, 82vw);
   display: grid;
   place-items: center;
+}
+
+body.output-mode .stage-wrap {
+  width: 100vw;
+  height: 100vh;
 }
 
 .stage {
@@ -199,6 +231,11 @@ button:hover {
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   transform-origin: top left;
+}
+
+body.output-mode .stage {
+  border: 0;
+  box-shadow: none;
 }
 
 .multi-quads {
@@ -298,6 +335,11 @@ button:hover {
 
 .guides.hidden,
 .handles.hidden {
+  display: none;
+}
+
+body.output-mode .guides,
+body.output-mode .handles {
   display: none;
 }
 

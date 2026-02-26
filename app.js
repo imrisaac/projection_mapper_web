@@ -1,4 +1,8 @@
 const STORAGE_KEY = "projection-mapper-presets-v1";
+const API_STATE_ENDPOINT = "/api/state";
+const API_UPLOAD_ENDPOINT = "/api/upload";
+const SYNC_PUSH_DEBOUNCE_MS = 80;
+const OUTPUT_POLL_MS = 120;
 const CORNER_NAMES = ["Top Left", "Top Right", "Bottom Right", "Bottom Left"];
 
 const stage = document.getElementById("stage");
@@ -18,6 +22,8 @@ const solidColor = document.getElementById("solid-color");
 const displayModeSelect = document.getElementById("display-mode");
 const videoFileInput = document.getElementById("video-file");
 const videoAssetList = document.getElementById("video-asset-list");
+const videoOpacityInput = document.getElementById("video-opacity");
+const videoOpacityValue = document.getElementById("video-opacity-value");
 const assignVideoCurrentBtn = document.getElementById("assign-video-current");
 const assignVideoPresetBtn = document.getElementById("assign-video-preset");
 const playVideosBtn = document.getElementById("play-videos");
@@ -65,6 +71,18 @@ const state = {
   videoCounter: 0,
 };
 
+const urlParams = new URLSearchParams(window.location.search);
+const IS_OUTPUT_MODE = urlParams.get("mode") === "output";
+
+const syncRuntime = {
+  suppressPush: false,
+  pushTimer: null,
+  pushInFlight: false,
+  pushPending: false,
+  lastServerVersion: 0,
+  pollTimer: null,
+};
+
 const cornerInputs = [];
 const handles = [];
 
@@ -84,6 +102,27 @@ function normalizeDisplayMode(value) {
 
 function normalizeShape(value) {
   return value === "circle" ? "circle" : "quad";
+}
+
+function normalizeVideoOpacity(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 1;
+  }
+
+  if (numeric > 1) {
+    return clamp(numeric / 100, 0, 1);
+  }
+
+  return clamp(numeric, 0, 1);
+}
+
+function deepClone(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function nextObjectId() {
@@ -135,6 +174,7 @@ function serializeObject(object) {
     fg: object.fg,
     displayMode: object.displayMode,
     solidColor: object.solidColor,
+    videoOpacity: object.videoOpacity,
     videoAssetId: object.videoAssetId,
   };
 }
@@ -162,6 +202,7 @@ function createObject(overrides = {}) {
     fg: typeof overrides.fg === "string" ? overrides.fg : fgColor.value,
     displayMode: normalizeDisplayMode(overrides.displayMode ?? overrides.sourceType),
     solidColor: typeof overrides.solidColor === "string" ? overrides.solidColor : solidColor.value,
+    videoOpacity: normalizeVideoOpacity(overrides.videoOpacity),
     videoAssetId: typeof overrides.videoAssetId === "string" ? overrides.videoAssetId : "",
   };
 }
@@ -188,6 +229,7 @@ function normalizeObject(raw, presetWidth, presetHeight, index) {
     fg: typeof raw?.fg === "string" ? raw.fg : "#f5f5f5",
     displayMode: normalizeDisplayMode(raw?.displayMode ?? raw?.sourceType),
     solidColor: typeof raw?.solidColor === "string" ? raw.solidColor : "#ffffff",
+    videoOpacity: normalizeVideoOpacity(raw?.videoOpacity),
     videoAssetId: typeof raw?.videoAssetId === "string" ? raw.videoAssetId : "",
   };
 }
@@ -207,6 +249,238 @@ function normalizePresetRecord(raw) {
     width: presetWidth,
     height: presetHeight,
     objects,
+  };
+}
+
+function normalizeVideoAssets(rawAssets) {
+  const normalized = {};
+  if (!isObject(rawAssets)) {
+    return normalized;
+  }
+
+  Object.entries(rawAssets).forEach(([id, asset]) => {
+    if (!id || !isObject(asset)) {
+      return;
+    }
+
+    if (typeof asset.url !== "string" || !asset.url) {
+      return;
+    }
+
+    normalized[id] = {
+      name: typeof asset.name === "string" && asset.name ? asset.name : id,
+      url: asset.url,
+    };
+  });
+
+  return normalized;
+}
+
+function buildSharedStatePayload() {
+  return deepClone({
+    width: state.width,
+    height: state.height,
+    presets: state.presets,
+    activeMultiPresets: state.activeMultiPresets,
+    currentPresetName: state.currentPresetName,
+    objects: state.objects.map((object) => serializeObject(object)),
+    activeObjectId: state.activeObjectId,
+    selectedVideoAssetId: state.selectedVideoAssetId,
+    videoAssets: state.videoAssets,
+  });
+}
+
+function applySharedStatePayload(payload) {
+  if (!isObject(payload)) {
+    return false;
+  }
+
+  const nextWidth = Math.max(320, Math.floor(Number(payload.width) || state.width));
+  const nextHeight = Math.max(240, Math.floor(Number(payload.height) || state.height));
+  setResolution(nextWidth, nextHeight);
+
+  const nextVideoAssets = normalizeVideoAssets(payload.videoAssets);
+  const nextPresets = {};
+  if (isObject(payload.presets)) {
+    Object.entries(payload.presets).forEach(([name, preset]) => {
+      if (!name || !isObject(preset)) {
+        return;
+      }
+      nextPresets[name] = normalizePresetRecord(preset);
+    });
+  }
+
+  state.videoAssets = nextVideoAssets;
+  state.presets = nextPresets;
+
+  if (Array.isArray(payload.objects) && payload.objects.length > 0) {
+    state.objects = payload.objects.map((object, index) => normalizeObject(object, state.width, state.height, index));
+  } else {
+    state.objects = [];
+  }
+  ensureAtLeastOneObject();
+
+  const requestedActiveObjectId = typeof payload.activeObjectId === "string" ? payload.activeObjectId : "";
+  if (state.objects.some((object) => object.id === requestedActiveObjectId)) {
+    state.activeObjectId = requestedActiveObjectId;
+  } else {
+    state.activeObjectId = state.objects[0].id;
+  }
+
+  const requestedPresetName = typeof payload.currentPresetName === "string" ? payload.currentPresetName : "";
+  state.currentPresetName = state.presets[requestedPresetName] ? requestedPresetName : "";
+
+  const requestedSelectedVideo = typeof payload.selectedVideoAssetId === "string" ? payload.selectedVideoAssetId : "";
+  if (state.videoAssets[requestedSelectedVideo]) {
+    state.selectedVideoAssetId = requestedSelectedVideo;
+  } else {
+    state.selectedVideoAssetId = Object.keys(state.videoAssets)[0] || "";
+  }
+
+  const presetNames = new Set(getPresetNames());
+  const requestedMulti = Array.isArray(payload.activeMultiPresets) ? payload.activeMultiPresets : [];
+  state.activeMultiPresets = requestedMulti.filter((name, index) => typeof name === "string" && presetNames.has(name) && requestedMulti.indexOf(name) === index);
+
+  if (presetName) {
+    presetName.value = state.currentPresetName;
+  }
+
+  renderPresetListOnly();
+  renderMultiPresetControls();
+  renderObjectList();
+  syncEditorFieldsFromActiveObject();
+  redraw(true);
+
+  return true;
+}
+
+async function fetchServerState() {
+  try {
+    const response = await fetch(API_STATE_ENDPOINT, { cache: "no-store" });
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json();
+    if (!isObject(payload)) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function pullSharedStateFromServer(force = false) {
+  const serverPayload = await fetchServerState();
+  if (!serverPayload || !isObject(serverPayload)) {
+    return false;
+  }
+
+  const version = Number(serverPayload.version) || 0;
+  const remoteState = isObject(serverPayload.state) ? serverPayload.state : null;
+  if (!remoteState) {
+    return false;
+  }
+
+  if (!force && version > 0 && version === syncRuntime.lastServerVersion) {
+    return false;
+  }
+
+  syncRuntime.suppressPush = true;
+  try {
+    const applied = applySharedStatePayload(remoteState);
+    if (applied) {
+      syncRuntime.lastServerVersion = version;
+    }
+    return applied;
+  } finally {
+    syncRuntime.suppressPush = false;
+  }
+}
+
+async function pushSharedStateToServer() {
+  if (IS_OUTPUT_MODE || syncRuntime.suppressPush) {
+    return;
+  }
+
+  if (syncRuntime.pushInFlight) {
+    syncRuntime.pushPending = true;
+    return;
+  }
+
+  syncRuntime.pushInFlight = true;
+  try {
+    const response = await fetch(API_STATE_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: buildSharedStatePayload() }),
+    });
+
+    if (response.ok) {
+      const data = await response.json().catch(() => null);
+      if (isObject(data) && Number.isFinite(Number(data.version))) {
+        syncRuntime.lastServerVersion = Number(data.version);
+      }
+    }
+  } catch {
+    // Keep local operation even if sync API is unavailable.
+  } finally {
+    syncRuntime.pushInFlight = false;
+    if (syncRuntime.pushPending) {
+      syncRuntime.pushPending = false;
+      queueSharedStatePush();
+    }
+  }
+}
+
+function queueSharedStatePush() {
+  if (IS_OUTPUT_MODE || syncRuntime.suppressPush) {
+    return;
+  }
+
+  if (syncRuntime.pushTimer) {
+    return;
+  }
+
+  syncRuntime.pushTimer = setTimeout(() => {
+    syncRuntime.pushTimer = null;
+    void pushSharedStateToServer();
+  }, SYNC_PUSH_DEBOUNCE_MS);
+}
+
+function startOutputModePolling() {
+  if (!IS_OUTPUT_MODE || syncRuntime.pollTimer) {
+    return;
+  }
+
+  syncRuntime.pollTimer = setInterval(() => {
+    void pullSharedStateFromServer();
+  }, OUTPUT_POLL_MS);
+}
+
+async function uploadVideoFileToServer(file) {
+  const nameParam = encodeURIComponent(file.name || `video-${Date.now()}`);
+  const response = await fetch(`${API_UPLOAD_ENDPOINT}?name=${nameParam}`, {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+
+  if (!response.ok) {
+    throw new Error("upload_failed");
+  }
+
+  const payload = await response.json();
+  if (!isObject(payload) || typeof payload.id !== "string" || typeof payload.url !== "string") {
+    throw new Error("invalid_upload_payload");
+  }
+
+  return {
+    id: payload.id,
+    name: typeof payload.name === "string" && payload.name ? payload.name : file.name,
+    url: payload.url,
   };
 }
 
@@ -366,6 +640,7 @@ function updateMainSourceMedia(object) {
     }
 
     sourceVideo.style.display = "block";
+    sourceVideo.style.opacity = String(object.videoOpacity);
     canvas.style.display = "none";
     attemptVideoPlay(sourceVideo);
     return;
@@ -379,6 +654,7 @@ function updateMainSourceMedia(object) {
   }
 
   sourceVideo.style.display = "none";
+  sourceVideo.style.opacity = "1";
   canvas.style.display = "block";
 }
 
@@ -615,7 +891,7 @@ function buildCanvasLayer(width, height, object) {
   return layerCanvas;
 }
 
-function buildVideoLayer(videoAssetId) {
+function buildVideoLayer(videoAssetId, videoOpacity) {
   const asset = state.videoAssets[videoAssetId];
   if (!asset) {
     return null;
@@ -623,6 +899,7 @@ function buildVideoLayer(videoAssetId) {
 
   const video = document.createElement("video");
   video.src = asset.url;
+  video.style.opacity = String(videoOpacity);
   video.muted = true;
   video.loop = true;
   video.autoplay = true;
@@ -647,7 +924,7 @@ function buildMappedLayerFromObject(object, sourceWidth, sourceHeight) {
     y: (corner.y / sourceHeight) * state.height,
   }));
 
-  const videoLayer = object.displayMode === "video" ? buildVideoLayer(object.videoAssetId) : null;
+  const videoLayer = object.displayMode === "video" ? buildVideoLayer(object.videoAssetId, object.videoOpacity) : null;
   if (videoLayer) {
     layer.append(videoLayer);
   } else {
@@ -736,6 +1013,12 @@ function renderVideoAssetList() {
   videoAssetList.value = state.selectedVideoAssetId;
 }
 
+function setVideoOpacityInput(opacity) {
+  const percent = Math.round(clamp(opacity * 100, 0, 100));
+  videoOpacityInput.value = String(percent);
+  videoOpacityValue.textContent = `${percent}%`;
+}
+
 function updateDisplayModeControlState(mode) {
   const isPattern = mode === "pattern";
   const isSolid = mode === "solid";
@@ -746,6 +1029,7 @@ function updateDisplayModeControlState(mode) {
   fgColor.disabled = !isPattern;
   solidColor.disabled = !isSolid;
   videoAssetList.disabled = !isVideo;
+  videoOpacityInput.disabled = !isVideo;
 }
 
 function syncEditorFieldsFromActiveObject() {
@@ -759,6 +1043,7 @@ function syncEditorFieldsFromActiveObject() {
   fgColor.value = active.fg;
   solidColor.value = active.solidColor;
   displayModeSelect.value = active.displayMode;
+  setVideoOpacityInput(active.videoOpacity);
   objectShapeSelect.value = active.shape;
 
   if (active.videoAssetId && state.videoAssets[active.videoAssetId]) {
@@ -780,24 +1065,36 @@ function setActiveObject(id) {
   redraw(true);
 }
 
-function addVideoAsset(file) {
+async function addVideoAsset(file) {
   if (!file.type || !file.type.startsWith("video/")) {
     return;
   }
 
-  state.videoCounter += 1;
-  const id = `video-${Date.now()}-${state.videoCounter}`;
+  let assetId = "";
+  let assetName = file.name;
+  let assetUrl = "";
 
-  state.videoAssets[id] = {
-    name: file.name,
-    url: URL.createObjectURL(file),
+  try {
+    const uploaded = await uploadVideoFileToServer(file);
+    assetId = uploaded.id;
+    assetName = uploaded.name;
+    assetUrl = uploaded.url;
+  } catch {
+    state.videoCounter += 1;
+    assetId = `video-${Date.now()}-${state.videoCounter}`;
+    assetUrl = URL.createObjectURL(file);
+  }
+
+  state.videoAssets[assetId] = {
+    name: assetName,
+    url: assetUrl,
   };
 
-  state.selectedVideoAssetId = id;
+  state.selectedVideoAssetId = assetId;
 
   const active = getActiveObject();
   if (active && active.displayMode === "video" && !active.videoAssetId) {
-    active.videoAssetId = id;
+    active.videoAssetId = assetId;
   }
 
   renderVideoAssetList();
@@ -904,6 +1201,7 @@ function setActiveMultiPresets(names) {
   state.activeMultiPresets = next;
   renderMultiPresetControls();
   renderSceneLayers();
+  queueSharedStatePush();
 }
 
 function redraw(renderScene = false) {
@@ -924,6 +1222,8 @@ function redraw(renderScene = false) {
   if (renderScene) {
     renderSceneLayers();
   }
+
+  queueSharedStatePush();
 }
 
 function savePresets() {
@@ -947,7 +1247,7 @@ function loadPresets() {
   }
 }
 
-function refreshPresetList() {
+function renderPresetListOnly() {
   const names = getPresetNames();
   const previousValue = presetList.value;
 
@@ -962,6 +1262,11 @@ function refreshPresetList() {
   if (names.includes(previousValue)) {
     presetList.value = previousValue;
   }
+}
+
+function refreshPresetList() {
+  const names = getPresetNames();
+  renderPresetListOnly();
 
   state.activeMultiPresets = state.activeMultiPresets.filter((name) => names.includes(name));
   if (!names.includes(state.currentPresetName)) {
@@ -970,6 +1275,7 @@ function refreshPresetList() {
 
   renderMultiPresetControls(names);
   renderSceneLayers();
+  queueSharedStatePush();
 }
 
 function saveCurrentPreset(name) {
@@ -1014,6 +1320,7 @@ function createObjectFromActiveTemplate() {
     fg: active.fg,
     displayMode: active.displayMode,
     solidColor: active.solidColor,
+    videoOpacity: active.videoOpacity,
     videoAssetId: active.videoAssetId,
     shape: active.shape,
   });
@@ -1040,6 +1347,7 @@ function duplicateActiveObject() {
     fg: active.fg,
     displayMode: active.displayMode,
     solidColor: active.solidColor,
+    videoOpacity: active.videoOpacity,
     videoAssetId: active.videoAssetId,
   });
 
@@ -1055,6 +1363,7 @@ function deleteActiveObject() {
       only.corners = createDefaultCorners(state.width, state.height, 0);
       only.displayMode = "pattern";
       only.solidColor = "#ffffff";
+      only.videoOpacity = 1;
       redraw(true);
     }
     return;
@@ -1164,6 +1473,18 @@ solidColor.addEventListener("input", () => {
   redraw(true);
 });
 
+videoOpacityInput.addEventListener("input", () => {
+  const active = getActiveObject();
+  if (!active) {
+    return;
+  }
+
+  const percent = Number(videoOpacityInput.value);
+  active.videoOpacity = normalizeVideoOpacity(percent / 100);
+  setVideoOpacityInput(active.videoOpacity);
+  redraw(true);
+});
+
 displayModeSelect.addEventListener("change", () => {
   const active = getActiveObject();
   if (!active) {
@@ -1190,9 +1511,12 @@ objectShapeSelect.addEventListener("change", () => {
   redraw(true);
 });
 
-videoFileInput.addEventListener("change", () => {
+videoFileInput.addEventListener("change", async () => {
   const files = Array.from(videoFileInput.files || []);
-  files.forEach((file) => addVideoAsset(file));
+  for (const file of files) {
+    // Upload sequentially to keep ordering predictable in the asset list.
+    await addVideoAsset(file);
+  }
   videoFileInput.value = "";
 });
 
@@ -1344,11 +1668,20 @@ presetList.addEventListener("change", () => {
 
 window.addEventListener("beforeunload", () => {
   Object.values(state.videoAssets).forEach((asset) => {
-    URL.revokeObjectURL(asset.url);
+    if (typeof asset.url === "string" && asset.url.startsWith("blob:")) {
+      URL.revokeObjectURL(asset.url);
+    }
   });
 });
 
-function bootstrap() {
+async function bootstrap() {
+  if (IS_OUTPUT_MODE) {
+    document.body.classList.add("output-mode");
+    state.guidesVisible = false;
+    guides.classList.add("hidden");
+    handlesWrap.classList.add("hidden");
+  }
+
   setResolution(state.width, state.height);
 
   state.objects = [
@@ -1371,7 +1704,17 @@ function bootstrap() {
   renderObjectList();
   syncEditorFieldsFromActiveObject();
 
+  if (IS_OUTPUT_MODE) {
+    await pullSharedStateFromServer(true);
+    startOutputModePolling();
+  } else {
+    const pulled = await pullSharedStateFromServer(true);
+    if (!pulled) {
+      queueSharedStatePush();
+    }
+  }
+
   redraw(true);
 }
 
-bootstrap();
+void bootstrap();

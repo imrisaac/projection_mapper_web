@@ -1,0 +1,16 @@
+[Unit]
+Description=Projection Mapper Sync Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/projection_mapper
+Environment=PORT=8080
+ExecStart=/usr/bin/node /home/pi/projection_mapper/server.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
