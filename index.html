@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Projection Mapper</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <aside class="controls">
+        <h1>Projection Mapper</h1>
+
+        <section>
+          <h2>Pattern</h2>
+          <label>
+            Type
+            <select id="pattern-type">
+              <option value="grid">Grid</option>
+              <option value="checker">Checkerboard</option>
+              <option value="crosshair">Crosshair</option>
+              <option value="bars">Color Bars</option>
+            </select>
+          </label>
+          <label>
+            Background
+            <input id="bg-color" type="color" value="#111111" />
+          </label>
+          <label>
+            Foreground
+            <input id="fg-color" type="color" value="#f5f5f5" />
+          </label>
+        </section>
+
+        <section>
+          <h2>Media</h2>
+          <label>
+            Display Mode
+            <select id="display-mode">
+              <option value="pattern">Pattern</option>
+              <option value="solid">Solid Color</option>
+              <option value="video">Video</option>
+            </select>
+          </label>
+          <label>
+            Solid Color
+            <input id="solid-color" type="color" value="#ffffff" />
+          </label>
+          <label>
+            Upload Video
+            <input id="video-file" type="file" accept="video/*" multiple />
+          </label>
+          <label>
+            Loaded Videos
+            <select id="video-asset-list" size="4"></select>
+          </label>
+          <div class="row">
+            <button id="assign-video-current" type="button">Apply To Current</button>
+            <button id="assign-video-preset" type="button">Apply To Preset</button>
+          </div>
+          <div class="row">
+            <button id="play-videos" type="button">Play Videos</button>
+            <button id="pause-videos" type="button">Pause Videos</button>
+          </div>
+          <p class="hint">Uploaded files are session-only and need reloading after refresh.</p>
+        </section>
+
+        <section>
+          <h2>Resolution</h2>
+          <div class="row">
+            <label>
+              Width
+              <input id="out-width" type="number" min="320" step="1" value="1280" />
+            </label>
+            <label>
+              Height
+              <input id="out-height" type="number" min="240" step="1" value="720" />
+            </label>
+          </div>
+          <button id="apply-resolution" type="button">Apply</button>
+        </section>
+
+        <section>
+          <h2>Corners</h2>
+          <p class="hint">Drag handles on the stage or edit values directly.</p>
+          <div class="corner-grid" id="corner-grid"></div>
+          <div class="row">
+            <button id="reset-corners" type="button">Reset</button>
+            <button id="fit-to-stage" type="button">Fit to Stage</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Objects</h2>
+          <label>
+            Object List
+            <select id="object-list" size="5"></select>
+          </label>
+          <div class="row">
+            <button id="add-object" type="button">Add Object</button>
+            <button id="duplicate-object" type="button">Duplicate</button>
+            <button id="delete-object" type="button">Delete</button>
+          </div>
+          <label>
+            Shape
+            <select id="object-shape">
+              <option value="quad">Warped Polygon/Square</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
+        </section>
+
+        <section>
+          <h2>Presets</h2>
+          <label>
+            Name
+            <input id="preset-name" type="text" placeholder="main-wall" />
+          </label>
+          <div class="row">
+            <button id="save-preset" type="button">Save</button>
+            <button id="load-preset" type="button">Load</button>
+            <button id="delete-preset" type="button">Delete</button>
+          </div>
+          <select id="preset-list" size="4"></select>
+          <p class="hint">Composite display (show multiple presets together).</p>
+          <div class="row">
+            <button id="select-all-multi" type="button">Select All</button>
+            <button id="clear-multi" type="button">Clear Multi</button>
+          </div>
+          <div id="multi-preset-list" class="multi-preset-list"></div>
+        </section>
+
+        <section>
+          <h2>View</h2>
+          <div class="row">
+            <button id="toggle-guides" type="button">Hide Guides</button>
+            <button id="fullscreen" type="button">Fullscreen Stage</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <div class="stage-wrap">
+          <div id="stage" class="stage">
+            <div id="multi-quads" class="multi-quads"></div>
+            <div id="quad" class="quad">
+              <video id="source-video" playsinline muted loop></video>
+              <canvas id="source-canvas"></canvas>
+            </div>
+            <svg id="guides" class="guides" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+            <div id="handles" class="handles"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
