@@ -1,6 +1,6 @@
 {
-  "version": 4,
-  "updatedAt": "2026-02-26T03:27:30.940Z",
+  "version": 190,
+  "updatedAt": "2026-02-26T03:53:28.157Z",
   "state": {
     "width": 1280,
     "height": 720,
@@ -32,6 +32,8 @@
               }
             ],
             "pattern": "grid",
+            "patternAnimated": false,
+            "patternSpeed": 1,
             "bg": "#111111",
             "fg": "#f5f5f5",
             "displayMode": "video",
@@ -62,6 +64,8 @@
               }
             ],
             "pattern": "grid",
+            "patternAnimated": false,
+            "patternSpeed": 1,
             "bg": "#111111",
             "fg": "#f5f5f5",
             "displayMode": "solid",
@@ -92,6 +96,8 @@
               }
             ],
             "pattern": "grid",
+            "patternAnimated": false,
+            "patternSpeed": 1,
             "bg": "#111111",
             "fg": "#f5f5f5",
             "displayMode": "video",
@@ -122,6 +128,8 @@
               }
             ],
             "pattern": "grid",
+            "patternAnimated": false,
+            "patternSpeed": 1,
             "bg": "#111111",
             "fg": "#f5f5f5",
             "displayMode": "video",
@@ -158,6 +166,8 @@
               }
             ],
             "pattern": "grid",
+            "patternAnimated": false,
+            "patternSpeed": 1,
             "bg": "#111111",
             "fg": "#f5f5f5",
             "displayMode": "solid",
@@ -185,15 +195,17 @@
             "y": 44.040470041950655
           },
           {
-            "x": 349.05890169705407,
-            "y": 302.0404919128835
+            "x": 289.2353486285542,
+            "y": 444.5184702994851
           },
           {
-            "x": 25.058870798003273,
-            "y": 353.0404962362074
+            "x": 24.23532335618242,
+            "y": 246.51845351481575
           }
         ],
         "pattern": "grid",
+        "patternAnimated": false,
+        "patternSpeed": 1,
         "bg": "#111111",
         "fg": "#f5f5f5",
         "displayMode": "video",
@@ -224,6 +236,8 @@
           }
         ],
         "pattern": "grid",
+        "patternAnimated": false,
+        "patternSpeed": 1,
         "bg": "#111111",
         "fg": "#f5f5f5",
         "displayMode": "solid",
@@ -254,6 +268,8 @@
           }
         ],
         "pattern": "grid",
+        "patternAnimated": false,
+        "patternSpeed": 1,
         "bg": "#111111",
         "fg": "#f5f5f5",
         "displayMode": "video",
@@ -267,8 +283,8 @@
         "shape": "circle",
         "corners": [
           {
-            "x": 676.0589328822072,
-            "y": 241.92281103539455
+            "x": 815.1177229993556,
+            "y": 66.19486034773595
           },
           {
             "x": 1182,
@@ -283,16 +299,50 @@
             "y": 591.9816786008774
           }
         ],
-        "pattern": "grid",
-        "bg": "#111111",
-        "fg": "#f5f5f5",
-        "displayMode": "video",
+        "pattern": "circles",
+        "patternAnimated": true,
+        "patternSpeed": 1.2,
+        "bg": "#ffffff",
+        "fg": "#00f900",
+        "displayMode": "pattern",
         "solidColor": "#ff4013",
         "videoOpacity": 1,
         "videoAssetId": "video-1772067429714-2"
+      },
+      {
+        "id": "obj-1772077575524-2",
+        "name": "Object 5",
+        "shape": "quad",
+        "corners": [
+          {
+            "x": 409.2353600726471,
+            "y": 91.75373092259139
+          },
+          {
+            "x": 730.2353906855956,
+            "y": 164.28309498113802
+          },
+          {
+            "x": 705.2353883014096,
+            "y": 505.16553964958524
+          },
+          {
+            "x": 322.23535177567976,
+            "y": 482.2831219383343
+          }
+        ],
+        "pattern": "noise",
+        "patternAnimated": true,
+        "patternSpeed": 1,
+        "bg": "#111111",
+        "fg": "#f5f5f5",
+        "displayMode": "pattern",
+        "solidColor": "#ff4013",
+        "videoOpacity": 1,
+        "videoAssetId": ""
       }
     ],
-    "activeObjectId": "obj-1772066815396-1",
+    "activeObjectId": "obj-1772067440120-7",
     "selectedVideoAssetId": "1772076447262-b547b615-The_Office-_Season_8_Disc_3_t00.mp4",
     "videoAssets": {
       "1772076447262-b547b615-The_Office-_Season_8_Disc_3_t00.mp4": {

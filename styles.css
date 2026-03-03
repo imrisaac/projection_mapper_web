@@ -75,6 +75,13 @@ label {
   margin-bottom: 0.6rem;
 }
 
+.inline-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+}
+
 input:not([type="checkbox"]),
 select,
 button {
@@ -162,6 +169,17 @@ button:hover {
 }
 
 #video-opacity-value {
+  flex: 0 0 52px;
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+#pattern-speed {
+  flex: 1;
+}
+
+#pattern-speed-value {
   flex: 0 0 52px;
   text-align: right;
   font-size: 0.8rem;

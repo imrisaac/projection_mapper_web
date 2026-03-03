@@ -15,6 +15,9 @@ const sourceVideo = document.getElementById("source-video");
 const ctx = canvas.getContext("2d");
 
 const patternType = document.getElementById("pattern-type");
+const patternAnimateInput = document.getElementById("pattern-animate");
+const patternSpeedInput = document.getElementById("pattern-speed");
+const patternSpeedValue = document.getElementById("pattern-speed-value");
 const bgColor = document.getElementById("bg-color");
 const fgColor = document.getElementById("fg-color");
 const solidColor = document.getElementById("solid-color");
@@ -83,6 +86,18 @@ const syncRuntime = {
   pollTimer: null,
 };
 
+const animationRuntime = {
+  rafId: null,
+};
+
+const noiseRuntime = {
+  canvas: null,
+  ctx: null,
+  imageData: null,
+  width: 0,
+  height: 0,
+};
+
 const cornerInputs = [];
 const handles = [];
 
@@ -115,6 +130,47 @@ function normalizeVideoOpacity(value) {
   }
 
   return clamp(numeric, 0, 1);
+}
+
+function normalizePatternSpeed(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 1;
+  }
+  return clamp(numeric, 0.1, 3);
+}
+
+function parseHexColor(value, fallback = { r: 255, g: 255, b: 255 }) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const hex = value.trim().toLowerCase();
+  if (!hex.startsWith("#")) {
+    return fallback;
+  }
+
+  if (hex.length === 4) {
+    const r = parseInt(hex[1] + hex[1], 16);
+    const g = parseInt(hex[2] + hex[2], 16);
+    const b = parseInt(hex[3] + hex[3], 16);
+    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+      return fallback;
+    }
+    return { r, g, b };
+  }
+
+  if (hex.length === 7) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+      return fallback;
+    }
+    return { r, g, b };
+  }
+
+  return fallback;
 }
 
 function deepClone(data) {
@@ -170,6 +226,8 @@ function serializeObject(object) {
     shape: object.shape,
     corners: cloneCorners(object.corners),
     pattern: object.pattern,
+    patternAnimated: object.patternAnimated,
+    patternSpeed: object.patternSpeed,
     bg: object.bg,
     fg: object.fg,
     displayMode: object.displayMode,
@@ -198,6 +256,8 @@ function createObject(overrides = {}) {
       ? normalizeCorners(overrides.corners, state.width, state.height)
       : createDefaultCorners(state.width, state.height, inset),
     pattern: typeof overrides.pattern === "string" ? overrides.pattern : patternType.value,
+    patternAnimated: Boolean(overrides.patternAnimated),
+    patternSpeed: normalizePatternSpeed(overrides.patternSpeed),
     bg: typeof overrides.bg === "string" ? overrides.bg : bgColor.value,
     fg: typeof overrides.fg === "string" ? overrides.fg : fgColor.value,
     displayMode: normalizeDisplayMode(overrides.displayMode ?? overrides.sourceType),
@@ -225,6 +285,8 @@ function normalizeObject(raw, presetWidth, presetHeight, index) {
       ? normalizeCorners(raw.corners, presetWidth, presetHeight)
       : createDefaultCorners(presetWidth, presetHeight, fallbackInset),
     pattern: typeof raw?.pattern === "string" ? raw.pattern : "grid",
+    patternAnimated: Boolean(raw?.patternAnimated),
+    patternSpeed: normalizePatternSpeed(raw?.patternSpeed),
     bg: typeof raw?.bg === "string" ? raw.bg : "#111111",
     fg: typeof raw?.fg === "string" ? raw.fg : "#f5f5f5",
     displayMode: normalizeDisplayMode(raw?.displayMode ?? raw?.sourceType),
@@ -530,6 +592,10 @@ function drawPattern(targetCtx, width, height, options) {
   const bg = options.bg;
   const fg = options.fg;
   const type = options.type;
+  const phase = Number(options.phase) || 0;
+  const animate = Boolean(options.animate);
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : performance.now();
+  const speed = normalizePatternSpeed(options.speed);
 
   targetCtx.fillStyle = bg;
   targetCtx.fillRect(0, 0, width, height);
@@ -540,12 +606,13 @@ function drawPattern(targetCtx, width, height, options) {
 
   if (type === "grid") {
     const step = Math.max(20, Math.round(Math.min(width, height) / 20));
+    const offset = animate ? (phase * step) : 0;
     targetCtx.beginPath();
-    for (let x = 0; x <= width; x += step) {
+    for (let x = -offset; x <= width; x += step) {
       targetCtx.moveTo(x, 0);
       targetCtx.lineTo(x, height);
     }
-    for (let y = 0; y <= height; y += step) {
+    for (let y = -offset; y <= height; y += step) {
       targetCtx.moveTo(0, y);
       targetCtx.lineTo(width, y);
     }
@@ -554,9 +621,10 @@ function drawPattern(targetCtx, width, height, options) {
 
   if (type === "checker") {
     const size = Math.max(24, Math.round(Math.min(width, height) / 12));
-    for (let y = 0; y < height; y += size) {
-      for (let x = 0; x < width; x += size) {
-        if (((x / size + y / size) | 0) % 2 === 0) {
+    const shift = animate ? Math.round(phase * size) : 0;
+    for (let y = -shift; y < height + size; y += size) {
+      for (let x = -shift; x < width + size; x += size) {
+        if ((((x + shift) / size + (y + shift) / size) | 0) % 2 === 0) {
           targetCtx.fillRect(x, y, size, size);
         }
       }
@@ -567,6 +635,7 @@ function drawPattern(targetCtx, width, height, options) {
     const cx = width / 2;
     const cy = height / 2;
     const pad = Math.min(width, height) * 0.1;
+    const ringScale = animate ? (0.86 + Math.sin(phase * Math.PI * 2) * 0.18) : 1;
 
     targetCtx.beginPath();
     targetCtx.moveTo(pad, cy);
@@ -576,7 +645,7 @@ function drawPattern(targetCtx, width, height, options) {
     targetCtx.stroke();
 
     targetCtx.beginPath();
-    targetCtx.arc(cx, cy, Math.min(width, height) * 0.12, 0, Math.PI * 2);
+    targetCtx.arc(cx, cy, Math.min(width, height) * 0.12 * ringScale, 0, Math.PI * 2);
     targetCtx.stroke();
 
     targetCtx.font = `${Math.max(14, Math.round(Math.min(width, height) * 0.03))}px monospace`;
@@ -586,9 +655,11 @@ function drawPattern(targetCtx, width, height, options) {
   if (type === "bars") {
     const colors = ["#ffffff", "#f4ea2a", "#13e6e6", "#30d030", "#d32bd3", "#e32626", "#1550dd", "#0a0a0a"];
     const barWidth = width / colors.length;
+    const shift = animate ? Math.floor(phase * colors.length) : 0;
 
     colors.forEach((color, index) => {
-      targetCtx.fillStyle = color;
+      const colorIndex = (index + shift) % colors.length;
+      targetCtx.fillStyle = colors[colorIndex];
       targetCtx.fillRect(index * barWidth, 0, barWidth + 1, height * 0.72);
     });
 
@@ -600,6 +671,168 @@ function drawPattern(targetCtx, width, height, options) {
       targetCtx.fillRect(index * barWidth, height - lowHeight, barWidth + 1, lowHeight);
     });
   }
+
+  if (type === "diagonal") {
+    const step = Math.max(18, Math.round(Math.min(width, height) / 24));
+    const offset = animate ? (phase * step) : 0;
+    targetCtx.beginPath();
+    for (let i = -height - offset; i <= width + height; i += step) {
+      targetCtx.moveTo(i, 0);
+      targetCtx.lineTo(i - height, height);
+    }
+    targetCtx.stroke();
+  }
+
+  if (type === "dots") {
+    const spacing = Math.max(20, Math.round(Math.min(width, height) / 18));
+    const radius = Math.max(1.5, spacing * 0.12);
+    const offset = animate ? (phase * spacing) : 0;
+    for (let y = spacing / 2 - offset; y < height + spacing; y += spacing) {
+      for (let x = spacing / 2 - offset; x < width + spacing; x += spacing) {
+        targetCtx.beginPath();
+        targetCtx.arc(x, y, radius, 0, Math.PI * 2);
+        targetCtx.fill();
+      }
+    }
+  }
+
+  if (type === "circles") {
+    const cx = width / 2;
+    const cy = height / 2;
+    const maxR = Math.hypot(width, height) / 2;
+    const step = Math.max(24, Math.round(Math.min(width, height) / 14));
+    const offset = animate ? (phase * step) : 0;
+
+    targetCtx.beginPath();
+    for (let r = Math.max(4, offset); r <= maxR; r += step) {
+      targetCtx.moveTo(cx + r, cy);
+      targetCtx.arc(cx, cy, r, 0, Math.PI * 2);
+    }
+    targetCtx.stroke();
+  }
+
+  if (type === "starburst") {
+    const cx = width / 2;
+    const cy = height / 2;
+    const rays = 36;
+    const radius = Math.hypot(width, height);
+    const angleOffset = animate ? (phase * Math.PI * 2) : 0;
+
+    targetCtx.beginPath();
+    for (let i = 0; i < rays; i += 1) {
+      const angle = (i / rays) * Math.PI * 2 + angleOffset;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      targetCtx.moveTo(cx, cy);
+      targetCtx.lineTo(x, y);
+    }
+    targetCtx.stroke();
+  }
+
+  if (type === "grayscale") {
+    const steps = 16;
+    const stepWidth = width / steps;
+    for (let i = 0; i < steps; i += 1) {
+      const v = Math.round((i / (steps - 1)) * 255);
+      targetCtx.fillStyle = `rgb(${v}, ${v}, ${v})`;
+      targetCtx.fillRect(i * stepWidth, 0, stepWidth + 1, height);
+    }
+
+    targetCtx.strokeStyle = fg;
+    targetCtx.lineWidth = Math.max(1, Math.round(Math.min(width, height) * 0.0016));
+    targetCtx.strokeRect(0, 0, width, height);
+
+    if (animate) {
+      const indicatorX = phase * width;
+      targetCtx.strokeStyle = fg;
+      targetCtx.lineWidth = Math.max(2, Math.round(Math.min(width, height) * 0.006));
+      targetCtx.beginPath();
+      targetCtx.moveTo(indicatorX, 0);
+      targetCtx.lineTo(indicatorX, height);
+      targetCtx.stroke();
+    }
+  }
+
+  if (type === "corners") {
+    const pulse = animate ? (0.9 + Math.sin(phase * Math.PI * 2) * 0.2) : 1;
+    const len = Math.max(26, Math.round(Math.min(width, height) * 0.12 * pulse));
+    const pad = Math.max(8, Math.round(Math.min(width, height) * 0.02));
+
+    targetCtx.lineWidth = Math.max(2, Math.round(Math.min(width, height) * 0.005));
+    targetCtx.beginPath();
+
+    targetCtx.moveTo(pad, pad + len);
+    targetCtx.lineTo(pad, pad);
+    targetCtx.lineTo(pad + len, pad);
+
+    targetCtx.moveTo(width - pad - len, pad);
+    targetCtx.lineTo(width - pad, pad);
+    targetCtx.lineTo(width - pad, pad + len);
+
+    targetCtx.moveTo(width - pad, height - pad - len);
+    targetCtx.lineTo(width - pad, height - pad);
+    targetCtx.lineTo(width - pad - len, height - pad);
+
+    targetCtx.moveTo(pad + len, height - pad);
+    targetCtx.lineTo(pad, height - pad);
+    targetCtx.lineTo(pad, height - pad - len);
+
+    targetCtx.stroke();
+  }
+
+  if (type === "noise") {
+    const scale = Math.max(1, Math.round(Math.min(width, height) / 900));
+    const noiseWidth = Math.max(1, Math.ceil(width / scale));
+    const noiseHeight = Math.max(1, Math.ceil(height / scale));
+    const snowColor = parseHexColor(fg);
+
+    if (!noiseRuntime.canvas) {
+      noiseRuntime.canvas = document.createElement("canvas");
+      noiseRuntime.ctx = noiseRuntime.canvas.getContext("2d");
+    }
+
+    if (
+      !noiseRuntime.imageData ||
+      noiseRuntime.width !== noiseWidth ||
+      noiseRuntime.height !== noiseHeight
+    ) {
+      noiseRuntime.canvas.width = noiseWidth;
+      noiseRuntime.canvas.height = noiseHeight;
+      noiseRuntime.imageData = noiseRuntime.ctx.createImageData(noiseWidth, noiseHeight);
+      noiseRuntime.width = noiseWidth;
+      noiseRuntime.height = noiseHeight;
+    }
+
+    const pixels = noiseRuntime.imageData.data;
+    const staticSeed = (((noiseWidth * 374761393) ^ (noiseHeight * 668265263)) ^ 0x9e3779b9) >>> 0;
+    const frameTick = Math.floor((nowMs / 1000) * (120 * speed));
+    let seed = animate ? (staticSeed ^ Math.imul(frameTick, 2246822519)) >>> 0 : staticSeed;
+    const density = animate ? 0.2 : 0.18;
+    const threshold = Math.floor(1024 * density);
+    for (let i = 0; i < pixels.length; i += 4) {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      const isSpeck = (seed & 1023) < threshold;
+      if (!isSpeck) {
+        pixels[i] = 0;
+        pixels[i + 1] = 0;
+        pixels[i + 2] = 0;
+        pixels[i + 3] = 0;
+        continue;
+      }
+
+      const brightness = 0.55 + (((seed >>> 10) & 255) / 255) * 0.45;
+      pixels[i] = Math.min(255, Math.round(snowColor.r * brightness));
+      pixels[i + 1] = Math.min(255, Math.round(snowColor.g * brightness));
+      pixels[i + 2] = Math.min(255, Math.round(snowColor.b * brightness));
+      pixels[i + 3] = 160 + ((seed >>> 24) & 95);
+    }
+
+    noiseRuntime.ctx.putImageData(noiseRuntime.imageData, 0, 0);
+    targetCtx.save();
+    targetCtx.imageSmoothingEnabled = false;
+    targetCtx.drawImage(noiseRuntime.canvas, 0, 0, noiseWidth, noiseHeight, 0, 0, width, height);
+    targetCtx.restore();
+  }
 }
 
 function drawSolid(targetCtx, width, height, color) {
@@ -607,17 +840,35 @@ function drawSolid(targetCtx, width, height, color) {
   targetCtx.fillRect(0, 0, width, height);
 }
 
-function renderActiveObjectCanvas(object) {
+function getPatternPhase(object, nowMs = performance.now()) {
+  if (!object.patternAnimated) {
+    return 0;
+  }
+
+  const cyclesPerSecond = normalizePatternSpeed(object.patternSpeed);
+  return ((nowMs / 1000) * cyclesPerSecond) % 1;
+}
+
+function drawObjectPattern(targetCtx, width, height, object, nowMs = performance.now()) {
+  const phase = getPatternPhase(object, nowMs);
+  drawPattern(targetCtx, width, height, {
+    type: object.pattern,
+    bg: object.bg,
+    fg: object.fg,
+    animate: object.patternAnimated,
+    phase,
+    nowMs,
+    speed: object.patternSpeed,
+  });
+}
+
+function renderActiveObjectCanvas(object, nowMs = performance.now()) {
   if (object.displayMode === "solid") {
     drawSolid(ctx, state.width, state.height, object.solidColor);
     return;
   }
 
-  drawPattern(ctx, state.width, state.height, {
-    type: object.pattern,
-    bg: object.bg,
-    fg: object.fg,
-  });
+  drawObjectPattern(ctx, state.width, state.height, object, nowMs);
 }
 
 function attemptVideoPlay(videoElement) {
@@ -870,8 +1121,9 @@ function applyWarpToElement(element, sourceWidth, sourceHeight, destinationCorne
   element.style.transform = `matrix3d(${matrix.join(",")})`;
 }
 
-function buildCanvasLayer(width, height, object) {
+function buildCanvasLayer(width, height, object, nowMs = performance.now()) {
   const layerCanvas = document.createElement("canvas");
+  layerCanvas.className = "mapped-pattern";
   layerCanvas.width = width;
   layerCanvas.height = height;
 
@@ -880,13 +1132,17 @@ function buildCanvasLayer(width, height, object) {
     if (object.displayMode === "solid") {
       drawSolid(layerCtx, width, height, object.solidColor);
     } else {
-      drawPattern(layerCtx, width, height, {
-        type: object.pattern,
-        bg: object.bg,
-        fg: object.fg,
-      });
+      drawObjectPattern(layerCtx, width, height, object, nowMs);
     }
   }
+
+  // Cache the source object so the animation loop can redraw without rebuilding layers.
+  layerCanvas._patternRender = {
+    object,
+    width,
+    height,
+    ctx: layerCtx,
+  };
 
   return layerCanvas;
 }
@@ -909,7 +1165,7 @@ function buildVideoLayer(videoAssetId, videoOpacity) {
   return video;
 }
 
-function buildMappedLayerFromObject(object, sourceWidth, sourceHeight) {
+function buildMappedLayerFromObject(object, sourceWidth, sourceHeight, nowMs = performance.now()) {
   const layer = document.createElement("div");
   layer.className = "multi-layer";
   if (object.shape === "circle") {
@@ -928,14 +1184,14 @@ function buildMappedLayerFromObject(object, sourceWidth, sourceHeight) {
   if (videoLayer) {
     layer.append(videoLayer);
   } else {
-    layer.append(buildCanvasLayer(sourceWidth, sourceHeight, object));
+    layer.append(buildCanvasLayer(sourceWidth, sourceHeight, object, nowMs));
   }
 
   applyWarpToElement(layer, sourceWidth, sourceHeight, scaledCorners);
   return layer;
 }
 
-function renderSceneLayers() {
+function renderSceneLayers(nowMs = performance.now()) {
   multiQuads.innerHTML = "";
   let renderedLayers = 0;
 
@@ -944,7 +1200,7 @@ function renderSceneLayers() {
       return;
     }
 
-    const layer = buildMappedLayerFromObject(object, state.width, state.height);
+    const layer = buildMappedLayerFromObject(object, state.width, state.height, nowMs);
     multiQuads.append(layer);
     renderedLayers += 1;
   });
@@ -960,13 +1216,93 @@ function renderSceneLayers() {
     }
 
     preset.objects.forEach((object) => {
-      const layer = buildMappedLayerFromObject(object, preset.width, preset.height);
+      const layer = buildMappedLayerFromObject(object, preset.width, preset.height, nowMs);
       multiQuads.append(layer);
       renderedLayers += 1;
     });
   });
 
   stage.classList.toggle("is-composite", renderedLayers > 0);
+}
+
+function hasAnyAnimatedPatternVisible() {
+  const active = getActiveObject();
+  if (active && active.displayMode === "pattern" && active.patternAnimated) {
+    return true;
+  }
+
+  const localAnimated = state.objects.some((object) => {
+    return object.id !== state.activeObjectId && object.displayMode === "pattern" && object.patternAnimated;
+  });
+  if (localAnimated) {
+    return true;
+  }
+
+  return state.activeMultiPresets.some((presetName) => {
+    if (presetName === state.currentPresetName) {
+      return false;
+    }
+    const preset = state.presets[presetName];
+    if (!preset || !Array.isArray(preset.objects)) {
+      return false;
+    }
+    return preset.objects.some((object) => object.displayMode === "pattern" && object.patternAnimated);
+  });
+}
+
+function renderAnimatedPatternFrame(nowMs = performance.now()) {
+  const active = getActiveObject();
+  if (!active) {
+    return;
+  }
+
+  if (active.displayMode === "pattern" && active.patternAnimated) {
+    drawObjectPattern(ctx, state.width, state.height, active, nowMs);
+  }
+
+  const patternCanvases = multiQuads.querySelectorAll("canvas.mapped-pattern");
+  patternCanvases.forEach((canvasElement) => {
+    const renderMeta = canvasElement._patternRender;
+    if (!renderMeta || !renderMeta.ctx || !renderMeta.object) {
+      return;
+    }
+
+    if (renderMeta.object.displayMode !== "pattern" || !renderMeta.object.patternAnimated) {
+      return;
+    }
+
+    drawObjectPattern(renderMeta.ctx, renderMeta.width, renderMeta.height, renderMeta.object, nowMs);
+  });
+}
+
+function stopPatternAnimationLoop() {
+  if (!animationRuntime.rafId) {
+    return;
+  }
+
+  cancelAnimationFrame(animationRuntime.rafId);
+  animationRuntime.rafId = null;
+}
+
+function animationFrame(nowMs) {
+  if (!hasAnyAnimatedPatternVisible()) {
+    stopPatternAnimationLoop();
+    return;
+  }
+
+  renderAnimatedPatternFrame(nowMs);
+  animationRuntime.rafId = requestAnimationFrame(animationFrame);
+}
+
+function ensurePatternAnimationLoop() {
+  if (!hasAnyAnimatedPatternVisible()) {
+    stopPatternAnimationLoop();
+    return;
+  }
+
+  if (!animationRuntime.rafId) {
+    animationRuntime.rafId = requestAnimationFrame(animationFrame);
+  }
 }
 
 function renderObjectList() {
@@ -1019,12 +1355,20 @@ function setVideoOpacityInput(opacity) {
   videoOpacityValue.textContent = `${percent}%`;
 }
 
+function setPatternSpeedInput(speed) {
+  const normalized = normalizePatternSpeed(speed);
+  patternSpeedInput.value = String(normalized);
+  patternSpeedValue.textContent = `${normalized.toFixed(1)}x`;
+}
+
 function updateDisplayModeControlState(mode) {
   const isPattern = mode === "pattern";
   const isSolid = mode === "solid";
   const isVideo = mode === "video";
 
   patternType.disabled = !isPattern;
+  patternAnimateInput.disabled = !isPattern;
+  patternSpeedInput.disabled = !isPattern;
   bgColor.disabled = !isPattern;
   fgColor.disabled = !isPattern;
   solidColor.disabled = !isSolid;
@@ -1039,6 +1383,8 @@ function syncEditorFieldsFromActiveObject() {
   }
 
   patternType.value = active.pattern;
+  patternAnimateInput.checked = Boolean(active.patternAnimated);
+  setPatternSpeedInput(active.patternSpeed);
   bgColor.value = active.bg;
   fgColor.value = active.fg;
   solidColor.value = active.solidColor;
@@ -1205,12 +1551,13 @@ function setActiveMultiPresets(names) {
 }
 
 function redraw(renderScene = false) {
+  const nowMs = performance.now();
   const active = getActiveObject();
   if (!active) {
     return;
   }
 
-  renderActiveObjectCanvas(active);
+  renderActiveObjectCanvas(active, nowMs);
   updateMainSourceMedia(active);
   updateCornerInputs(active);
   updateHandlePositions(active);
@@ -1220,9 +1567,10 @@ function redraw(renderScene = false) {
   applyWarpToElement(quad, state.width, state.height, active.corners);
 
   if (renderScene) {
-    renderSceneLayers();
+    renderSceneLayers(nowMs);
   }
 
+  ensurePatternAnimationLoop();
   queueSharedStatePush();
 }
 
@@ -1316,6 +1664,8 @@ function createObjectFromActiveTemplate() {
 
   return createObject({
     pattern: active.pattern,
+    patternAnimated: active.patternAnimated,
+    patternSpeed: active.patternSpeed,
     bg: active.bg,
     fg: active.fg,
     displayMode: active.displayMode,
@@ -1343,6 +1693,8 @@ function duplicateActiveObject() {
     shape: active.shape,
     corners,
     pattern: active.pattern,
+    patternAnimated: active.patternAnimated,
+    patternSpeed: active.patternSpeed,
     bg: active.bg,
     fg: active.fg,
     displayMode: active.displayMode,
@@ -1362,6 +1714,8 @@ function deleteActiveObject() {
       only.shape = "quad";
       only.corners = createDefaultCorners(state.width, state.height, 0);
       only.displayMode = "pattern";
+      only.patternAnimated = false;
+      only.patternSpeed = 1;
       only.solidColor = "#ffffff";
       only.videoOpacity = 1;
       redraw(true);
@@ -1440,6 +1794,27 @@ patternType.addEventListener("input", () => {
   }
 
   active.pattern = patternType.value;
+  redraw(true);
+});
+
+patternAnimateInput.addEventListener("change", () => {
+  const active = getActiveObject();
+  if (!active) {
+    return;
+  }
+
+  active.patternAnimated = patternAnimateInput.checked;
+  redraw(true);
+});
+
+patternSpeedInput.addEventListener("input", () => {
+  const active = getActiveObject();
+  if (!active) {
+    return;
+  }
+
+  active.patternSpeed = normalizePatternSpeed(patternSpeedInput.value);
+  setPatternSpeedInput(active.patternSpeed);
   redraw(true);
 });
 
@@ -1667,6 +2042,7 @@ presetList.addEventListener("change", () => {
 });
 
 window.addEventListener("beforeunload", () => {
+  stopPatternAnimationLoop();
   Object.values(state.videoAssets).forEach((asset) => {
     if (typeof asset.url === "string" && asset.url.startsWith("blob:")) {
       URL.revokeObjectURL(asset.url);

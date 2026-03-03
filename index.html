@@ -20,7 +20,25 @@
               <option value="checker">Checkerboard</option>
               <option value="crosshair">Crosshair</option>
               <option value="bars">Color Bars</option>
+              <option value="diagonal">Diagonal Lines</option>
+              <option value="dots">Dot Grid</option>
+              <option value="circles">Concentric Circles</option>
+              <option value="starburst">Starburst</option>
+              <option value="grayscale">Grayscale Ramp</option>
+              <option value="corners">Corner Markers</option>
+              <option value="noise">White Snow</option>
             </select>
+          </label>
+          <label class="inline-check">
+            <input id="pattern-animate" type="checkbox" />
+            Animate Pattern
+          </label>
+          <label>
+            Pattern Speed
+            <div class="row">
+              <input id="pattern-speed" type="range" min="0.1" max="3" step="0.1" value="1" />
+              <span id="pattern-speed-value">1.0x</span>
+            </div>
           </label>
           <label>
             Background

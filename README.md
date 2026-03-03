@@ -6,7 +6,8 @@ Browser-based projection mapping app with multi-object warping, media assignment
 
 - Draggable 4-corner warp for keystone/perspective correction
 - Homography transform applied via `matrix3d`
-- Built-in calibration patterns: grid, checkerboard, crosshair, color bars
+- Built-in calibration patterns: grid, checkerboard, crosshair, color bars, diagonals, dots, concentric circles, starburst, grayscale ramp, corner markers, and white snow
+- Optional animated patterns per object with speed control
 - Multiple objects per preset (each object is independently warped)
 - Per-object shape mode: warped polygon/square or circle
 - Per-object display mode: Pattern, Solid Color, or Video
@@ -38,10 +39,11 @@ Note: The old static-server approach still works for local-only editing, but mul
 2. Set each object's `Display Mode` in `Media` (`Pattern`, `Solid Color`, or `Video`).
 3. In `Objects`, add/duplicate/delete mapped objects and select the one you want to edit.
 4. For the selected object, drag the four corner handles and set shape to warped polygon/square or circle.
-5. If using `Video`, choose a loaded file, apply it, then set `Video Transparency`.
-6. Use `Apply To Preset` to attach a video directly to a saved preset object.
-7. In `Presets`, use the composite checklist to display multiple presets together.
-8. Use `Fullscreen Stage` for live projection.
+5. If using `Pattern`, optionally enable `Animate Pattern` and set `Pattern Speed`.
+6. If using `Video`, choose a loaded file, apply it, then set `Video Transparency`.
+7. Use `Apply To Preset` to attach a video directly to a saved preset object.
+8. In `Presets`, use the composite checklist to display multiple presets together.
+9. Use `Fullscreen Stage` for live projection.
 
 ## Raspberry Pi HDMI Kiosk
 
